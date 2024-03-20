@@ -11,12 +11,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
 // Block represents a block in the blockchain
 type Block struct {
-	Index     int    `json:"index"`
+	ID        string `json:"id"`
 	Timestamp string `json:"timestamp"`
 	Data      string `json:"data"`
 	PrevHash  string `json:"prevHash"`
@@ -57,11 +58,11 @@ func main() {
 func initBlockchain() {
 	// Initialize blockchain with genesis block
 	genesisBlock := Block{
-		Index:     0,
+		ID:        uuid.New().String(),
 		Timestamp: "2024-03-21 00:00:00",
 		Data:      "Genesis Block",
 		PrevHash:  "",
-		Hash:      calculateHash(0, "2024-03-21 00:00:00", "Genesis Block", ""),
+		Hash:      calculateHash("genesisHash", "2024-03-21 00:00:00", "Genesis Block", ""),
 	}
 	blockchain.Chain = append(blockchain.Chain, genesisBlock)
 }
@@ -71,11 +72,11 @@ func mineBlock(nodeID string) Block {
 	// For simplicity, let's just create a new block with arbitrary data
 	prevBlock := blockchain.Chain[len(blockchain.Chain)-1]
 	newBlock := Block{
-		Index:     prevBlock.Index + 1,
+		ID:        uuid.New().String(),
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
 		Data:      fmt.Sprintf("Data for Node %s", nodeID),
 		PrevHash:  prevBlock.Hash,
-		Hash:      calculateHash(prevBlock.Index+1, time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf("Data for Node %s", nodeID), prevBlock.Hash),
+		Hash:      calculateHash(prevBlock.Hash, time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf("Data for Node %s", nodeID), prevBlock.Hash),
 	}
 	blockchain.Chain = append(blockchain.Chain, newBlock)
 
@@ -84,8 +85,8 @@ func mineBlock(nodeID string) Block {
 	return newBlock
 }
 
-func calculateHash(index int, timestamp, data, prevHash string) string {
-	blockData := fmt.Sprintf("%d%s%s%s", index, timestamp, data, prevHash)
+func calculateHash(prevHash, timestamp, data, prevHash2 string) string {
+	blockData := fmt.Sprintf("%s%s%s%s", prevHash, timestamp, data, prevHash2)
 	hash := sha256.Sum256([]byte(blockData))
 	return fmt.Sprintf("%x", hash)
 }
@@ -107,11 +108,19 @@ func storeBlockData(block Block, nodeID string) {
 		log.Printf("Error reading existing block data: %v\n", err)
 	}
 
+	// Remove any block with the same ID
+	updatedBlocks := make([]Block, 0)
+	for _, b := range blocks {
+		if b.ID != block.ID {
+			updatedBlocks = append(updatedBlocks, b)
+		}
+	}
+
 	// Append the new block
-	blocks = append(blocks, block)
+	updatedBlocks = append(updatedBlocks, block)
 
 	// Marshal the updated blocks
-	data, err = json.Marshal(blocks)
+	data, err = json.Marshal(updatedBlocks)
 	if err != nil {
 		log.Printf("Error marshalling block data: %v\n", err)
 		return
@@ -135,9 +144,10 @@ func runNode(nodeID string) {
 	log.Printf("Node %s is running...\n", nodeID)
 
 	// Simulate continuous mining and syncing
+	// TODO: sync only not crate a new block
 	for {
 		// Simulate mining process (for demonstration purpose, it's just sleeping for a few seconds)
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 
 		// Mine a new block
 		newBlock := mineBlock(nodeID)
@@ -233,42 +243,64 @@ func registerNodeWithDiscovery(nodeID string) error {
 	return nil
 }
 
-func initNodeData() {
-	// Initial nodes array
-	nodes := []string{}
-
-	// Marshal the nodes array to JSON
-	data, err := json.Marshal(nodes)
-	if err != nil {
-		log.Fatalf("Error marshalling nodes array: %v", err)
-	}
-
-	// Write JSON data to nodes.json file
-	err = ioutil.WriteFile("nodes.json", data, 0644)
-	if err != nil {
-		log.Fatalf("Error writing nodes.json file: %v", err)
-	}
-
-	log.Println("nodes.json file created successfully.")
-}
-
 func startHTTPServer() {
 	e := echo.New()
 
-	// GET /chain endpoint to get the blockchain
 	e.GET("/chain", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, blockchain)
+		// Read blockchain data from files in the data directory
+		blockchainData, err := readBlockchainData()
+		if err != nil {
+			log.Printf("Error reading blockchain data: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to read blockchain data"})
+		}
+		return c.JSON(http.StatusOK, blockchainData)
 	})
 
-	// POST /mine endpoint to mine a new block
-	// e.POST("/mine", func(c echo.Context) error {
-	// 	// Implement mining logic here
-	// 	newBlock := mineBlock()
-	// 	return c.JSON(http.StatusOK, newBlock)
-	// })
+	// TODO: make the hash is correlated with the patient
+	// store the block only for nodes primary first (optional)
+	e.POST("/block", func(c echo.Context) error {
+		var block Block
+		if err := c.Bind(&block); err != nil {
+			return err
+		}
+
+		// Mine a new block
+		newBlock := mineBlock(block.Data)
+
+		// Sync the new block with other nodes
+		err := syncBlock(newBlock)
+		if err != nil {
+			log.Printf("Error syncing block: %v", err)
+		}
+
+		return c.JSON(http.StatusCreated, newBlock)
+	})
 
 	// Start HTTP server
 	port := ":8080" // You can specify any port you want
 	log.Printf("HTTP server listening on port %s...\n", port)
 	e.Logger.Fatal(e.Start(port))
+}
+
+func readBlockchainData() ([]Block, error) {
+	// Read blockchain data from files
+	data, err := ioutil.ReadFile(dataDirectory + getPrimaryNodes() + ".json")
+	if err != nil {
+		return nil, err
+	}
+
+	var blocks []Block
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return nil, err
+	}
+
+	return blocks, nil
+}
+
+func getPrimaryNodes() string {
+	nodes, err := loadNodes()
+	if err != nil {
+		log.Fatalf("Error loading nodes: %v", err)
+	}
+	return nodes[len(nodes)-1]
 }
