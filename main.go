@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -61,29 +61,33 @@ func initBlockchain() {
 		Timestamp: "2024-03-21 00:00:00",
 		Data:      "Genesis Block",
 		PrevHash:  "",
-		Hash:      "genesisHash",
+		Hash:      calculateHash(0, "2024-03-21 00:00:00", "Genesis Block", ""),
 	}
 	blockchain.Chain = append(blockchain.Chain, genesisBlock)
 }
 
-func mineBlock() Block {
+func mineBlock(nodeID string) Block {
 	// In a real implementation, you would perform proof-of-work here
 	// For simplicity, let's just create a new block with arbitrary data
+	prevBlock := blockchain.Chain[len(blockchain.Chain)-1]
 	newBlock := Block{
-		Index:     len(blockchain.Chain),
+		Index:     prevBlock.Index + 1,
 		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
 		Data:      fmt.Sprintf("Data for Node %s", nodeID),
-		PrevHash:  blockchain.Chain[len(blockchain.Chain)-1].Hash,
-		Hash:      "newBlockHash", // In real scenario, this should be calculated based on the block's data and other parameters
+		PrevHash:  prevBlock.Hash,
+		Hash:      calculateHash(prevBlock.Index+1, time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf("Data for Node %s", nodeID), prevBlock.Hash),
 	}
 	blockchain.Chain = append(blockchain.Chain, newBlock)
 
-	otherNodes, _ := loadNodes()
-	for _, nodeID := range otherNodes {
-		storeBlockData(newBlock, nodeID)
-	}
+	storeBlockData(newBlock, nodeID)
 
 	return newBlock
+}
+
+func calculateHash(index int, timestamp, data, prevHash string) string {
+	blockData := fmt.Sprintf("%d%s%s%s", index, timestamp, data, prevHash)
+	hash := sha256.Sum256([]byte(blockData))
+	return fmt.Sprintf("%x", hash)
 }
 
 func storeBlockData(block Block, nodeID string) {
@@ -147,25 +151,15 @@ func runNode(nodeID string) {
 }
 
 func syncBlock(newBlock Block) error {
-	// Serialize the new block
-	blockBytes, err := json.Marshal(newBlock)
-	if err != nil {
-		return err
-	}
-
 	// Query discovery service to get other nodes
 	otherNodes, err := loadNodes()
 	if err != nil {
 		return err
 	}
 
-	// Iterate over other nodes and send the new block to them
+	// Iterate over other nodes and update block data files
 	for _, node := range otherNodes {
-		url := fmt.Sprintf("http://%s:8080/sync", node) // Assuming /sync endpoint to receive new blocks
-		_, err := http.Post(url, "application/json", bytes.NewBuffer(blockBytes))
-		if err != nil {
-			log.Printf("Error syncing with node %s: %v", node, err)
-		}
+		storeBlockData(newBlock, node)
 	}
 
 	return nil
@@ -267,11 +261,11 @@ func startHTTPServer() {
 	})
 
 	// POST /mine endpoint to mine a new block
-	e.POST("/mine", func(c echo.Context) error {
-		// Implement mining logic here
-		newBlock := mineBlock()
-		return c.JSON(http.StatusOK, newBlock)
-	})
+	// e.POST("/mine", func(c echo.Context) error {
+	// 	// Implement mining logic here
+	// 	newBlock := mineBlock()
+	// 	return c.JSON(http.StatusOK, newBlock)
+	// })
 
 	// Start HTTP server
 	port := ":8080" // You can specify any port you want
