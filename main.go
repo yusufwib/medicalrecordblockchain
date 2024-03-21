@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -24,6 +23,24 @@ type Block struct {
 	Hash      string `json:"hash"`
 }
 
+// type MedicalRecord struct {
+// 	ID        string `json:"id"`
+// 	Timestamp string `json:"timestamp"`
+// 	Data      string `json:"data"`
+// 	PrevHash  string `json:"prevHash"`
+// 	Hash      string `json:"hash"`
+// 	Patient   string `json:"patient"`
+// 	Doctor    string `json:"doctor"`
+// 	Status    string `json:"status"`
+// 	Type      string `json:"type"`
+// 	Location  string `json:"location"`
+// 	Notes     string `json:"notes"`
+// 	Image     string `json:"image"`
+// 	URL       string `json:"url"`
+// 	Date      string `json:"date"`
+// 	Time      string `json:"time"`
+// }
+
 // Blockchain represents the blockchain
 type Blockchain struct {
 	Chain []Block `json:"chain"`
@@ -33,7 +50,7 @@ var blockchain Blockchain
 
 // Data directory to store node data
 const dataDirectory = "./data/"
-const nodesFile = "nodes.json"
+const nodesFile = "./nodes/nodes.json"
 
 func main() {
 	nodeID := flag.String("NODE_ID", "", "Node ID")
@@ -97,7 +114,7 @@ func storeBlockData(block Block, nodeID string) {
 
 	// Read existing block data from file
 	var blocks []Block
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err == nil {
 		err = json.Unmarshal(data, &blocks)
 		if err != nil {
@@ -127,7 +144,7 @@ func storeBlockData(block Block, nodeID string) {
 	}
 
 	// Write updated data back to the file
-	err = ioutil.WriteFile(filename, data, 0644)
+	err = os.WriteFile(filename, data, 0644)
 	if err != nil {
 		log.Printf("Error writing block data to file: %v\n", err)
 	}
@@ -177,7 +194,7 @@ func syncBlock(newBlock Block) error {
 
 func loadNodes() ([]string, error) {
 	// Load nodes from nodes.json file
-	fileData, err := ioutil.ReadFile(nodesFile)
+	fileData, err := os.ReadFile(nodesFile)
 	if os.IsNotExist(err) {
 		// If file not found, create it
 		err := createNodesFile()
@@ -204,7 +221,7 @@ func createNodesFile() error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(nodesFile, data, 0644)
+	err = os.WriteFile(nodesFile, data, 0644)
 	if err != nil {
 		return err
 	}
@@ -217,7 +234,7 @@ func saveNodes(nodes []string) error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(nodesFile, data, 0644)
+	err = os.WriteFile(nodesFile, data, 0644)
 	if err != nil {
 		return err
 	}
@@ -284,7 +301,7 @@ func startHTTPServer() {
 
 func readBlockchainData() ([]Block, error) {
 	// Read blockchain data from files
-	data, err := ioutil.ReadFile(dataDirectory + getPrimaryNodes() + ".json")
+	data, err := os.ReadFile(dataDirectory + getPrimaryNodes() + ".json")
 	if err != nil {
 		return nil, err
 	}
@@ -304,3 +321,5 @@ func getPrimaryNodes() string {
 	}
 	return nodes[len(nodes)-1]
 }
+
+// TODO: pls add patient simulation
